@@ -1,3 +1,8 @@
+% Author: Anna Bosc
+% Affiliation: Istituto Italiano di Tecnologia
+% Year: 2026
+% Description: Part of the MATLAB pipeline for trajectory analysis of Chlamydomonas motility
+
 % === SCRIPT FILTRAGGIO ALGHE CON SALVATAGGIO IN .MAT === 
 % === Imposta il percorso di lavoro e crea una cartella per salvare i risultati ===
 % Imposta la cartella di lavoro (modifica con il percorso desiderato)
