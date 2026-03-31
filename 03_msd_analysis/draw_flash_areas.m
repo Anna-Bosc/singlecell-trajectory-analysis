@@ -1,3 +1,8 @@
+% Author: Anna Bosc
+% Affiliation: Istituto Italiano di Tecnologia
+% Year: 2026
+% Description: Part of the MATLAB pipeline for trajectory analysis of Chlamydomonas motility
+
 function draw_flash_areas(intervals, varargin)
     yl = ylim;
     for i = 1:size(intervals,1)
