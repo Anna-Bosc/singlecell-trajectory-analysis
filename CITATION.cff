@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+
+title: "MATLAB pipeline for kinematic analysis and clustering of single-cell trajectories"
+
+version: "v1.0"
+
+date-released: 2026-03-31
+
+authors:
+  - family-names: "Bosc"
+    given-names: "Anna"
+    orcid: "https://orcid.org/0000-0001-9466-1181"
+
+repository-code: "https://github.com/Anna-Bosc/singlecell-trajectory-analysis"
+
+license: "MIT"
+
+keywords:
+  - single-cell tracking
+  - motility analysis
+  - Chlamydomonas reinhardtii
+  - trajectory analysis
+  - clustering
+  - MATLAB
