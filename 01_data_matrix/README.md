@@ -40,7 +40,7 @@ This folder includes:
 1. Open MATLAB  
 2. Run: Tracking_codeAUTO_conversionUDM.mlx
 3. Provide the required inputs:
-
+- A dialog box will appear asking to select the main folder
 - `fps`: frame rate (frames per second)  
 - `roiPixels`: number of pixels corresponding to **10 µm**
 
