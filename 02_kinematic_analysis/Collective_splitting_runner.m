@@ -3,128 +3,108 @@
 % Year: 2026
 % Description: Part of the MATLAB pipeline for trajectory analysis of Chlamydomonas motility
 
-% === SCRIPT FILTRAGGIO ALGHE CON SALVATAGGIO IN .MAT === 
-% === Imposta il percorso di lavoro e crea una cartella per salvare i risultati ===
-% Imposta la cartella di lavoro (modifica con il percorso desiderato)
 clear all;
 close all;
-% Directory principale
-main_folder ='';
-% Trova le cartelle "cntrl_Dark"
-sample_folders = dir(fullfile(main_folder, 'sample_3*'));
-sample_folders = sample_folders([sample_folders.isdir]); % solo directory
+% Main directory
+main_folder =''; %inserte main path
+% Find sample folders
+sample_folders = dir(fullfile(main_folder, '*')); %insert name
+sample_folders = sample_folders([sample_folders.isdir]);
 
 
 for i = 1:length(sample_folders)
     sample_path = fullfile(main_folder, sample_folders(i).name);
 
-    % Trova le sottocartelle "cmp*"
-    video_folders = dir(fullfile(sample_path, 'tracking*'));
-    video_folders = video_folders([video_folders.isdir]); % solo directory
+    % Find tracking subfolders
+    video_folders = dir(fullfile(sample_path, '*')); %inserte name
+    video_folders = video_folders([video_folders.isdir]);
 
     for j = 1:length(video_folders)
 
         video_path = fullfile(sample_path, video_folders(j).name);
 
-        % Crea una nuova cartella per i risultati
         resultsFolder = fullfile(video_path, 'Collective_splittingCluster');
         if ~isfolder(resultsFolder)
             mkdir(resultsFolder);
-            fprintf('Cartella per i risultati creata: %s\n', resultsFolder);
+            fprintf('Results folder generated: %s\n', resultsFolder);
         end
         
-        % Carica file e prepara dati
-        matFileName = fullfile(video_path, 'converted_data.mat'); % Combina percorso e file
+        matFileName = fullfile(video_path, 'converted_data.mat');
         if ~isfile(matFileName)
-            error('Il file %s non esiste nel percorso specificato.', matFileName);
+            error('The file %s does not exist in the specified path.', matFileName);
         end
         
         dataStruct = load(matFileName);
         if ~isfield(dataStruct, 'converted_data')
-            error('Il file %s non contiene il campo "converted_data".', matFileName);
+            error('The file %s does not contains the “converted_data” field.', matFileName);
         end
-        disp('File caricato correttamente.');
+        disp('File uploaded successfully.');
         
         converted_data = dataStruct.converted_data;
         
-        % Parametri di analisi
-        lightDirection = [1 0];  % Direzione della luce (modifica se necessario)
-        minDisplacement = 20;    % Soglia per "ferma"
-        minStraightness = 0.3;   % Soglia per "direzionale"
-        hasLight = true;         % Se è presente la luce nello studio
-        nClusters = 2;           % Numero di cluster definito dal codice precedente
+        % analysis parameters
+        lightDirection = [1 0];  % light direction
+        minDisplacement = 20;    % µm, threshold for stationary
+        minStraightness = 0.3;   % threshold for directional
+        hasLight = true;         % true if light is present
+        nClusters = 2;           % number of clusters (from prior analysis)
         
-        % Inizializza la classe
         analyzer = CollectiveMotionAnalyzer_udm_lightOnOff(converted_data, lightDirection, minDisplacement, minStraightness, hasLight);
-        disp('Oggetto analyzer creato correttamente.');
+        disp('Object analyzer created successfully.');
         
-        % Classifica tracce
         [trackStats, summaryStats] = analyzer.classifyTracks();
-        disp('Tracce classificate.');
+        disp('Tracks classified.');
         
-        % Filtra tracce ferme, tonde e moventi
-        stationary_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "ferma"));
-        tondo_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "tondo"));
-        motile_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "tondo") | strcmp(trackStats.Label, "direzionale"));
+        % Filter tracks by type
+        stationary_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "Stationary"));
+        Circling_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "Circling"));
+        motile_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "Circling") | strcmp(trackStats.Label, "Directional"));
         
-        % Crea le matrici per tracce ferme, tonde e motili
         stationary_data = converted_data(ismember(converted_data.TRACK_ID, stationary_ids), :);
-        round_data = converted_data(ismember(converted_data.TRACK_ID, tondo_ids), :);
+        round_data = converted_data(ismember(converted_data.TRACK_ID, Circling_ids), :);
         motile_data = converted_data(ismember(converted_data.TRACK_ID, motile_ids), :);
         
-        % Salvataggio dei dati fermi
         stationary_file = fullfile(resultsFolder, 'stationary_data.mat');
         save(stationary_file, 'stationary_data');
-        disp('Dati fermi salvati in stationary_data.mat.');
+        disp('Stationary data are saved in stationary_data.mat.');
         
-        % Salvataggio dei dati rotondi
         round_file = fullfile(resultsFolder, 'round_data.mat');
         save(round_file, 'round_data');
-        disp('Dati rotondi salvati in round_data.mat.');
+        disp('Circling data are saved in round_data.mat.');
         
-        % Salvataggio dei dati motili
         motile_file = fullfile(resultsFolder, 'motile_data.mat');
         save(motile_file, 'motile_data');
-        disp('Dati motili salvati in motile_data.mat.');
+        disp('Motile data are saved in motile_data.mat.');
         
-        disp('Dati filtrati:');
-        fprintf('- Numero di tracce ferme: %d\n', numel(stationary_ids));
-        fprintf('- Numero di tracce tonde: %d\n', numel(tondo_ids));
-        fprintf('- Numero di tracce motili: %d\n', numel(motile_ids));
+        disp('Filtered data:');
+        fprintf('- Number of tracks Stationary: %d\n', numel(stationary_ids));
+        fprintf('- Number of tracks Circling: %d\n', numel(Circling_ids));
+        fprintf('- Number of tracks Motile: %d\n', numel(motile_ids));
         
-        % === Analisi tracce "direzionali" e clustering ===
-        % Filtra le tracce della categoria "direzionale"
-        directional_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "direzionale"));
+        % === Directional track analysis and clustering ===
+        directional_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "Directional"));
         directional_data = motile_data(ismember(motile_data.TRACK_ID, directional_ids), :);
         
-        % Esegui clustering con il numero definito manualmente di cluster
         clusterStats = analyzer.analyzeDirectionalClusters(summaryStats, nClusters);
         
-        % Struct per contenere tutte le matrici dei cluster
         cluster_struct = struct();
         
-        % Salva i dati per ogni cluster come matrici tipo converted_data
         for k = 1:nClusters
-            % Filtra i dati del cluster corrente
             cluster_ids = directional_ids(clusterStats.labels == k);
             cluster_k_data = directional_data(ismember(directional_data.TRACK_ID, cluster_ids), :);
         
-            % Salva la matrice tipo converted_data con un nome unico per ogni cluster
-            cluster_file = fullfile(resultsFolder, sprintf('cluster_%d_data.mat', k)); % Nome univoco per ogni cluster
+            cluster_file = fullfile(resultsFolder, sprintf('cluster_%d_data.mat', k));
             save(cluster_file, 'cluster_k_data');
-            fprintf('Dati del cluster %d salvati in %s\n', k, cluster_file);
+            fprintf('Data of cluster %d are saved in %s\n', k, cluster_file);
         
-            % Salva i dati in una struct per riassumere
             cluster_struct.(sprintf('Cluster_%d', k)) = cluster_k_data;
         end
         
-        % Salva la struct con tutte le matrici dei cluster
         struct_file = fullfile(resultsFolder, 'cluster_struct_data.mat');
         save(struct_file, 'cluster_struct');
-        disp(['Struct contenente tutte le matrici dei cluster salvata in: ' struct_file]);
+        disp(['A struct containing all the cluster matrixes saved in: ' struct_file]);
         
-        % Salvataggio completo
-        disp('Filtraggio e clustering completati.');
+        disp('Filtering and clustering completed.');
 
     end
 end

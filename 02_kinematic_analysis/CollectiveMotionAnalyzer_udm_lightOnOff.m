@@ -2,9 +2,9 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
     properties
         data            % table with tracking data
         lightDirection  % direction of light stimulus [x,y]
-        minDisplacement   % soglia per "ferma"
-        minStraightness   % soglia per "direzionale" vs "tondo"
-        hasLight          % true/false: presenza della luce
+        minDisplacement   % threshold for "stationary"
+        minStraightness   % threshold for "directional" vs "circling"
+        hasLight          % true/false: light present
     populationMeanAngle = NaN;
     populationMeanRayleigh = NaN;
     end
@@ -20,7 +20,7 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
     end
 
     methods
-        %% COSTRUTTORE
+        %% CONSTRUCTOR
         function obj = CollectiveMotionAnalyzer_udm_lightOnOff(data, lightDirection, minDisplacement, minStraightness, hasLight)
             obj.data = data;
             obj.lightDirection = lightDirection / norm(lightDirection);
@@ -35,32 +35,32 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
                 obj.minStraightness = minStraightness;
             end
             if nargin < 5
-                obj.hasLight = true; % default: si assume che la luce ci sia
+                obj.hasLight = true; % default: light assumed present
             else
                 obj.hasLight = hasLight;
             end
             if obj.hasLight
                 obj.computeLightAngles();
             else
-                obj.data.angle_to_light = NaN(height(obj.data), 1); % campo vuoto/non applicabile
+                obj.data.angle_to_light = NaN(height(obj.data), 1); % field not applicable
             end
             
         end
 
-        %% CLASSIFICA TRACCE (ferma, tondo, direzionale)
+        %% CLASSIFY TRACKS (stationary, circling, directional)
         function [trackStats, summaryStats] = classifyTracks(obj)
             allIDs = unique(obj.data.TRACK_ID);
             nTracks = numel(allIDs);
 
-            labels = strings(nTracks,1); % ferma, tondo, direzionale
-            netDisp = zeros(nTracks,1);  % spostamento netto
-            totDisp = zeros(nTracks,1);  % spostamento totale
+            labels = strings(nTracks,1); % stationary, circling, directional
+            netDisp = zeros(nTracks,1);  % net displacement
+            totDisp = zeros(nTracks,1);  % total displacement
             straightness = zeros(nTracks,1);
             meanSpeed = zeros(nTracks,1);
             deltaX = zeros(nTracks,1);
             deltaY = zeros(nTracks,1);
 
-            % Per clustering delle direzionali
+            % For directional cluster analysis
             directions = [];
             directions_trackIDs = [];
             deltaXs = [];
@@ -73,7 +73,7 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
                 track = obj.data(mask,:);
                 track = sortrows(track, 'FRAME_SOURCE');
                 if height(track) < 2
-                    labels(i) = "ferma";
+                    labels(i) = "Stationary";
                     continue;
                 end
 
@@ -97,9 +97,9 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
                 meanSpeed(i) = mean(track.SPEED, 'omitnan');
 
                 if netDisp(i) < obj.minDisplacement
-                    labels(i) = "ferma";
+                    labels(i) = "Stationary";
                 elseif straightness(i) >= obj.minStraightness
-                    labels(i) = "direzionale";
+                    labels(i) = "Directional";
                     theta = atan2(dy, dx);
                     directions = [directions; theta];
                     directions_trackIDs = [directions_trackIDs; id];
@@ -107,17 +107,17 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
                     deltaYs = [deltaYs; dy];
                     speeds_dir = [speeds_dir; meanSpeed(i)];
                 else
-                    labels(i) = "tondo";
+                    labels(i) = "Circling";
                 end
             end
 
             summaryStats.nTracks = nTracks;
-            summaryStats.nFerma = sum(labels == "ferma");
-            summaryStats.nTondo = sum(labels == "tondo");
-            summaryStats.nDirezionale = sum(labels == "direzionale");
-            summaryStats.percFerma = 100 * summaryStats.nFerma / nTracks;
-            summaryStats.percTondo = 100 * summaryStats.nTondo / nTracks;
-            summaryStats.percDirezionale = 100 * summaryStats.nDirezionale / nTracks;
+            summaryStats.nStationary = sum(labels == "Stationary");
+            summaryStats.nCircling = sum(labels == "Circling");
+            summaryStats.nDirectional = sum(labels == "Directional");
+            summaryStats.percStationary = 100 * summaryStats.nStationary / nTracks;
+            summaryStats.percCircling = 100 * summaryStats.nCircling / nTracks;
+            summaryStats.percDirectional = 100 * summaryStats.nDirectional / nTracks;
 
             trackStats = table(allIDs, labels, netDisp, totDisp, straightness, meanSpeed, deltaX, deltaY, ...
                 'VariableNames', {'TRACK_ID','Label','NetDisplacement','TotalDisplacement','Straightness','MeanSpeed','DeltaX','DeltaY'});
@@ -132,10 +132,10 @@ classdef CollectiveMotionAnalyzer_udm_lightOnOff < handle
         
         end
 
-%% CLUSTERING DIREZIONALE INTERATTIVO (flow principale)
+%% INTERACTIVE DIRECTIONAL CLUSTERING
 function clusterStats = analyzeDirectionalClustersInteractive(obj, summaryStats)
     if isempty(summaryStats.directions)
-        disp('Nessuna traccia direzionale trovata.');
+        disp('No directional traces found.');
         clusterStats = [];
         return;
     end
@@ -143,29 +143,23 @@ function clusterStats = analyzeDirectionalClustersInteractive(obj, summaryStats)
     XY = [cos(summaryStats.directions), sin(summaryStats.directions)];
     nPoints = size(XY,1);
 
-    % === SCELTA NUMERO CLUSTER IN MODO ROBUSTO ===
     if nPoints < 3
-        % Troppo pochi punti per clustering serio
-        warning('Troppi pochi punti direzionali per fare clustering (n=%d).', nPoints);
+        warning('There are too few data points to perform clustering (n=%d).', nPoints);
         nClusters = 1;
     else
-        % Non chiedere più cluster di quanti punti disponibili
         maxK = min(5, nPoints-1);
 
-        % Se restano solo 2 cluster possibili, silhouette funziona
         if maxK >= 2
             eva = evalclusters(XY, 'kmeans', 'silhouette', 'KList', 2:maxK);
             nClusters = eva.OptimalK;
         else
-            % Se non si può calcolare silhouette, fallback
-            warning('Uso 1 cluster perché silhouette non è calcolabile (n=%d).', nPoints);
+            warning('Using 1 cluster because the silhouette cannot be calculated (n=%d).', nPoints);
             nClusters = 1;
         end
     end
 
     finished = false;
     while ~finished
-        % --- Clustering (anche il caso 1 cluster viene gestito)
         if nClusters == 1
             idx = ones(nPoints,1);
             C = mean(XY,1);
@@ -173,7 +167,7 @@ function clusterStats = analyzeDirectionalClustersInteractive(obj, summaryStats)
             [idx, C] = kmeans(XY, nClusters, 'Replicates',10, 'MaxIter',500);
         end
 
-        % Statistiche per cluster
+        % Cluster statistics
         N_total = numel(summaryStats.directions);
         clusterStats = struct();
         clusterStats.nClusters = nClusters;
@@ -194,13 +188,13 @@ function clusterStats = analyzeDirectionalClustersInteractive(obj, summaryStats)
             compX = mean(summaryStats.deltaXs(mask));
             compY = mean(summaryStats.deltaYs(mask));
 
-            % --- Calcolo velocità
+            % --- Velocity statistics
             velocities = summaryStats.speeds_dir(mask);
-            meanSpeed = mean(velocities);
+            meanSpeed = mean(velocities,'omitnan');
             vel_std = std(velocities, 'omitnan');
             vel_sem = vel_std / sqrt(sum(~isnan(velocities)));
 
-            % --- Calcolo allineamento rispetto alla luce
+            % --- Light alignment
             lightDir = obj.lightDirection;
             clusterAngleVec = [compX, compY];
             if obj.hasLight && norm(lightDir) > 0 && norm(clusterAngleVec) > 0
@@ -223,10 +217,8 @@ function clusterStats = analyzeDirectionalClustersInteractive(obj, summaryStats)
             clusterStats.summary(k).lightAlignment = lightAlignment;
         end
 
-        % --- Output e visualizzazione
-        fprintf('\n--- Analisi direzioni principali (cluster) ---\n');
-        fprintf('Numero cluster: %d\n', nClusters);
-        % --- Stampa summary ---
+        fprintf('\n--- Analysis of main directions (clusters) ---\n');
+        fprintf('Number of clusters: %d\n', nClusters);
 fprintf('\n========================================\n');
 if nClusters == 1
     fprintf('  SINGLE GROUP OF DIRECTIONAL CELLS\n');
@@ -254,11 +246,10 @@ fprintf('========================================\n\n');
         endFrame   = max(obj.data.FRAME_SOURCE);
         obj.plotPhototaxisRose(startFrame, endFrame);
 
-        % --- Interazione utente
-        prompt = sprintf('Vuoi cambiare il numero di cluster? (attuale: %d) [S/N]: ', nClusters);
+        prompt = sprintf('Do you want to change the number of clusters? (now: %d) [Y/N]: ', nClusters);
         answer = input(prompt, 's');
-        if strcmpi(answer, 's')
-            nClusters = input('Inserisci il nuovo numero di cluster: ');
+        if strcmpi(answer, 'y')
+            nClusters = input('Enter the new number of clusters: ');
         else
             finished = true;
         end
@@ -266,7 +257,7 @@ fprintf('========================================\n\n');
 end
 
 
-        %% (ALTERNATIVO, NON USATO DI DEFAULT) CLUSTERING DIREZIONALE NON INTERATTIVO
+        %% (ALTERNATIVE, NOT USED BY DEFAULT) NON-INTERACTIVE DIRECTIONAL CLUSTERING
         function clusterStats = analyzeDirectionalClusters(obj, summaryStats, nClusters)
             directions = summaryStats.directions;
             if isempty(directions)
@@ -296,7 +287,12 @@ end
                 circ_std = sqrt(-2 * log(mean_vec_len));
                 compX = mean(summaryStats.deltaXs(mask));
                 compY = mean(summaryStats.deltaYs(mask));
-                meanSpeed = mean(summaryStats.speeds_dir(mask));
+
+                velocities = summaryStats.speeds_dir(mask);
+                meanSpeed  = mean(velocities, 'omitnan');
+                 vel_std    = std(velocities, 'omitnan');
+                 vel_sem    = vel_std / sqrt(sum(~isnan(velocities)));
+
                 lightDir = obj.lightDirection;
                 clusterAngleVec = [compX, compY];
                 if obj.hasLight && norm(lightDir) > 0 && norm(clusterAngleVec) > 0
@@ -313,11 +309,13 @@ end
                 clusterStats.summary(k).compX = compX;
                 clusterStats.summary(k).compY = compY;
                 clusterStats.summary(k).meanSpeed = meanSpeed;
+                clusterStats.summary(k).vel_std        = vel_std;          
+                clusterStats.summary(k).vel_sem        = vel_sem; 
                 clusterStats.summary(k).lightAlignment = lightAlignment;
             end
         end
 
-%% CALCOLO ANGOLI CON LA LUCE (versione corretta)
+%% COMPUTE LIGHT ANGLES
 function computeLightAngles(obj)
     if obj.hasLight
         dx = obj.data.POSITION_X_TARGET - obj.data.POSITION_X_SOURCE;
@@ -344,7 +342,7 @@ function computeLightAngles(obj)
     end
 end
 
-      %% METRICHE PER FINESTRA TEMPORALE
+      %% TIME WINDOW METRICS
 function metrics = analyzeTimeWindow(obj, startFrame, endFrame, motileOnly, motileIDs)
     if nargin < 4
         motileOnly = false;
@@ -427,7 +425,7 @@ end
     metrics.nTracks = numel(unique(windowData.TRACK_ID));
 end
 
- %% EVOLUZIONE TEMPORALE (Sliding window)
+ %% TEMPORAL EVOLUTION (sliding window)
 function results = analyzeTemporalEvolution(obj, windowSize, motileOnly, motileIDs)
     if nargin < 3
         motileOnly = false;
@@ -442,11 +440,9 @@ function results = analyzeTemporalEvolution(obj, windowSize, motileOnly, motileI
     arraySize = nWindows + 1;
 
     results = struct();
-    % campi che realmente restituirà analyzeTimeWindow
     metricFields = {'meanSpeed','stdSpeed','displacement','stdDisplacement', ...
                     'directionalChange','stdDirectionalChange','lightAlignment','stdLightAlignment', ...
                     'nTracks'};
-    % campi della finestra
     results.windowFrames = zeros(1,arraySize);
     results.windowTimes  = zeros(1,arraySize);
     for f = metricFields
@@ -489,7 +485,7 @@ function results = analyzeTemporalEvolution(obj, windowSize, motileOnly, motileI
         end
     end
 
-    % tronca array inutilizzati
+    % trim unused array entries
     for f = metricFields
         results.(f{1}) = results.(f{1})(1:idx-1);
     end
@@ -497,33 +493,27 @@ function results = analyzeTemporalEvolution(obj, windowSize, motileOnly, motileI
     results.windowTimes  = results.windowTimes(1:idx-1);
 end
 
-function [results_all, results_motili] = analyzeTemporalEvolutionBoth(obj, windowSize, motileIDs)
+function [results_all, results_motile] = analyzeTemporalEvolutionBoth(obj, windowSize, motileIDs)
     if nargin < 3
         motileIDs = [];
     end
-    % risultati per tutte le cellule
     results_all = obj.analyzeTemporalEvolution(windowSize, false, []);
-    % risultati solo per le motili
-    results_motili = obj.analyzeTemporalEvolution(windowSize, true, motileIDs);
+    results_motile = obj.analyzeTemporalEvolution(windowSize, true, motileIDs);
 end
 
- %% PLOT ROSE FOTOTASSI
+ %% PHOTOTAXIS ROSE PLOT
 function plotPhototaxisRose(obj, startFrame, endFrame)
-    % Seleziona i dati nella finestra
     windowMask = obj.data.FRAME_SOURCE >= startFrame & ...
                  obj.data.FRAME_SOURCE < endFrame;
     windowData = obj.data(windowMask, :);
 
-    % Calcola gli angoli di movimento
     dx = windowData.POSITION_X_TARGET - windowData.POSITION_X_SOURCE;
     dy = windowData.POSITION_Y_TARGET - windowData.POSITION_Y_SOURCE;
     movement_angles = atan2(dy, dx);
 
-    % Crea figura
     figure('Name', 'PhototaxisAnalysis', 'Position', [100 100 600 600]);
     ax = polaraxes;
 
-    % Istogramma polare normalizzato
     [counts, edges] = histcounts(movement_angles, 36, 'Normalization', 'probability');
     max_prob = max(counts);
     max_scale = ceil(max_prob * 20) / 20;
@@ -533,30 +523,24 @@ function plotPhototaxisRose(obj, startFrame, endFrame)
         'LineWidth', 1);
     hold(ax, 'on');
 
-    % Direzione della luce
     if obj.hasLight && norm(obj.lightDirection) > 0
         light_angle = atan2(obj.lightDirection(2), obj.lightDirection(1));
         polarplot(ax, [light_angle light_angle], [0 max_scale], 'y-', 'LineWidth', 3);
     end
 
-    % Vettore medio globale
     mean_cos = mean(cos(movement_angles));
     mean_sin = mean(sin(movement_angles));
     mean_angle = atan2(mean_sin, mean_cos);
     mean_vector_length = sqrt(mean_cos^2 + mean_sin^2);
     circular_std = sqrt(-2 * log(mean_vector_length));
 
-% Salva direzione della popolazione (rosa)
 obj.populationMeanAngle = mean_angle;
 obj.populationMeanRayleigh = mean_vector_length;
 
-    % Test di fototassi
     [p_value, is_significant] = obj.testPhototaxis();
 
-    % Movimento netto
     net_movement = obj.calculateNetMovement();
 
-    % Testo statistico
     stats_text = sprintf(['Average Angle: %.1f°\n' ...
                           'Directional Force: %.2f\n' ...
                           'Circular Std Dev: %.2f°\n' ...
@@ -572,7 +556,6 @@ obj.populationMeanRayleigh = mean_vector_length;
                           net_movement(1), ...
                           net_movement(2));
 
-    % Impostazioni estetiche assi
     ax.ThetaTick = 0:45:315;
     ax.ThetaTickLabel = {'0°','45°','90°','135°','180°','225°','270°','315°'};
     r_ticks = 0:max_scale/5:max_scale;
@@ -583,7 +566,6 @@ obj.populationMeanRayleigh = mean_vector_length;
     ax.ThetaMinorGrid = 'on';
     ax.RMinorTick = 'on';
 
-    % Titolo
     if obj.hasLight
         title(ax, {'Distribution of Motion Angles', 'Yellow line = Direction of Light'}, ...
               'FontSize', 14, 'FontWeight', 'bold');
@@ -592,72 +574,15 @@ obj.populationMeanRayleigh = mean_vector_length;
               'FontSize', 14, 'FontWeight', 'bold');
     end
 
-    % Aggiunge testo statistico
     text(ax, -0.6, 0.6, stats_text, ...
          'Units', 'normalized', 'FontSize', 12, ...
          'BackgroundColor', [1 1 1 0.8], 'EdgeColor', 'k');
 
     hold(ax, 'off');
 end
-% %% TEST FOTOTASSI (Rayleigh test fisicamente corretto sugli step)
-% function [p_value, Rbar, meanAngle] = testPhototaxis(obj, alpha)
-% 
-%     if nargin < 2
-%         alpha = 0.05;
-%     end
-% 
-%     if ~obj.hasLight || height(obj.data) == 0
-%         p_value = NaN;
-%         Rbar = NaN;
-%         meanAngle = NaN;
-%         return;
-%     end
-% 
-%     % --- Step vectors ---
-%     dx = obj.data.POSITION_X_TARGET - obj.data.POSITION_X_SOURCE;
-%     dy = obj.data.POSITION_Y_TARGET - obj.data.POSITION_Y_SOURCE;
-% 
-%     % --- Angoli ---
-%     theta_motion = atan2(dy, dx);
-%     theta_light  = atan2(obj.lightDirection(2), obj.lightDirection(1));
-%     theta = wrapToPi(theta_motion - theta_light);
-% 
-%     % --- Filtra step validi ---
-%     stepDisp = hypot(dx, dy);
-%     valid = stepDisp > 0 & ~isnan(theta) & ~isinf(theta);
-%     theta = theta(valid);
-% 
-%     n = numel(theta);
-% 
-%     if n < 5
-%         p_value = 1;
-%         Rbar = 0;
-%         meanAngle = NaN;
-%         return;
-%     end
-% 
-%     % --- Rayleigh ---
-%     C = sum(cos(theta));
-%     S = sum(sin(theta));
-% 
-%     R = sqrt(C^2 + S^2);
-%     Rbar = R / n;
-%     z = n * Rbar^2;
-% 
-%     if n <= 50
-%         p_value = exp(-z) * (1 + (2*z - z^2)/(4*n) ...
-%             - (24*z - 132*z^2 + 76*z^3 - 9*z^4)/(288*n^2));
-%     else
-%         p_value = exp(-z);
-%     end
-% 
-%     p_value = max(min(p_value,1),0);
-% 
-%     meanAngle = atan2(S, C);
-% end
 
 
-%% TEST FOTOTASSI (t-test su cos(θ) per traccia, fototassi positiva e negativa)
+%% PHOTOTAXIS TEST (one-sample t-test on cos(θ) per track)
 function [p_value, is_significant] = testPhototaxis(obj, alpha)
     if nargin < 2
         alpha = 0.05;
@@ -669,7 +594,7 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
         return;
     end
 
-    % Calcola cos(θ) medio per traccia (solo tracce con spostamento >= minDisplacement)
+    % Mean cos(θ) per track for tracks with net displacement >= minDisplacement
     track_ids = unique(obj.data.TRACK_ID);
     cos_per_track = NaN(numel(track_ids), 1);
 
@@ -690,7 +615,7 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
         angles = angles(~isnan(angles) & ~isinf(angles));
 
         if ~isempty(angles)
-            cos_per_track(k) = mean(cos(angles));  % coerente con il plot
+            cos_per_track(k) = mean(cos(angles));
         end
     end
 
@@ -706,10 +631,10 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
     meanAlignment = mean(cos_per_track);
     sem = std(cos_per_track) / sqrt(n);
 
-    % t-test one-sample contro 0, two-directional
+    % one-sample t-test against 0, bidirectional
     t_stat = meanAlignment / sem;
-    p_positive = 1 - tcdf(t_stat, n-1);   % fototassi positiva (verso luce)
-    p_negative = tcdf(t_stat, n-1);        % fototassi negativa (contro luce)
+    p_positive = 1 - tcdf(t_stat, n-1);   % positive phototaxis (toward light)
+    p_negative = tcdf(t_stat, n-1);        % negative phototaxis (away from light)
 
     if meanAlignment >= 0
         p_value = p_positive;
@@ -718,24 +643,23 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
     end
     p_value = max(min(p_value, 1), 0);
 
-    % Significativo se allineamento biologicamente rilevante in una delle due direzioni
-    is_significant = (p_value < alpha) && (abs(meanAlignment) > 0.20);
+    is_significant = (p_value < alpha) && (abs(meanAlignment) > 0.25);
 
     % --- DEBUG ---
     fprintf('\n[DEBUG testPhototaxis]\n');
-    fprintf('  n tracce motili : %d\n',   n);
+    fprintf('  n tracks motile : %d\n',   n);
     fprintf('  meanAlignment   : %.4f\n', meanAlignment);
     fprintf('  t_stat          : %.4f\n', t_stat);
     fprintf('  p_value         : %.4e\n', p_value);
     fprintf('  |alignment|>0.25: %d\n',   abs(meanAlignment) > 0.25);
     if meanAlignment >= 0
-        fprintf('  Direzione       : positiva (verso luce)\n');
+        fprintf('  Direction       : positive (toward the light)\n');
     else
-        fprintf('  Direzione       : negativa (contro luce)\n');
+        fprintf('  Direction       : negative (away from the light)\n');
     end
 end
 
-        %% MOVIMENTO NETTO
+        %% NET MOVEMENT
         function net_movement = calculateNetMovement(obj)
             dx = obj.data.POSITION_X_TARGET - obj.data.POSITION_X_SOURCE;
             dy = obj.data.POSITION_Y_TARGET - obj.data.POSITION_Y_SOURCE;
@@ -743,14 +667,14 @@ end
         end
         %% SUMMARY STATS
         function plotSummaryStats(obj, trackStats, summaryStats, converted_data)
-    % --- 1. Distribuzione delle velocità medie delle tracce
-    % --- 2. Distribuzione degli spostamenti netti delle tracce
-    % --- 3. Barplot percentuali tracce ferme/tonde/direzionali
-    % --- 4. Autocorrelazione media della velocità delle tracce
+    % 1. Mean speed distribution across tracks
+    % 2. Net displacement distribution across tracks
+    % 3. Bar plot of stationary/circling/directional track percentages
+    % 4. Mean speed autocorrelation across tracks
 
-    figure('Name','StatisticheTracce','Position',[100 100 1200 800]);
+    figure('Name','TracksStat','Position',[100 100 1200 800]);
 
-    % --- Subplot 1: Istogramma velocità medie
+    % --- Subplot 1: Mean speed histogram
     subplot(2,2,1);
     speeds = trackStats.MeanSpeed;
     histogram(speeds, 30, 'FaceColor',[0.3 0.6 0.9]);
@@ -759,18 +683,17 @@ end
     title('Average velocity distribution');
     grid on
     hold on
-    % Calcoli statistici
     m = mean(speeds,'omitnan');
     s = std(speeds,'omitnan');
     n = sum(~isnan(speeds));
     sem = s/sqrt(n);
     yl = ylim;
-    plot([m m], yl, 'r--', 'LineWidth',2, 'DisplayName','Media');
+    plot([m m], yl, 'r--', 'LineWidth',2, 'DisplayName','Mean');
     legend({'Distribution','Average'},'Location','best');
     text(m, yl(2)*0.85, sprintf('Average = %.2f\nStd = %.2f\nSEM = %.2f', m, s, sem), ...
          'Color', 'r', 'FontSize', 10, 'FontWeight', 'bold','HorizontalAlignment','left');
 
-    % --- Subplot 2: Istogramma spostamenti netti
+    % --- Subplot 2: Net displacement histogram
     subplot(2,2,2);
     disps = trackStats.NetDisplacement;
     histogram(disps, 30, 'FaceColor',[0.7 0.3 0.8]);
@@ -784,44 +707,42 @@ end
     n2 = sum(~isnan(disps));
     sem2 = s2/sqrt(n2);
     yl = ylim;
-    plot([m2 m2], yl, 'r--', 'LineWidth',2, 'DisplayName','Media');
+    plot([m2 m2], yl, 'r--', 'LineWidth',2, 'DisplayName','Mean');
     legend({'Distribution','Average'},'Location','best');
     text(m2, yl(2)*0.85, sprintf('Average = %.2f\nStd = %.2f\nSEM = %.2f', m2, s2, sem2), ...
          'Color', 'r', 'FontSize', 10, 'FontWeight', 'bold','HorizontalAlignment','left');
 
-    % --- Subplot 3: Barplot percentuali comportamenti
+    % --- Subplot 3: Track behavior percentages
     subplot(2,2,3);
-    perc = [summaryStats.percFerma, summaryStats.percTondo, summaryStats.percDirezionale];
+    perc = [summaryStats.percStationary, summaryStats.percCircling, summaryStats.percDirectional];
     bar(perc, 'FaceColor',[0.2 0.7 0.3]);
     set(gca, 'XTickLabel', {'Stationary','Circling','Directional'});
     ylabel('Percentage (%)');
     ylim([0 100]);
     title('Percentage of track types');
     grid on
-    % Annotazioni con valori
     for k = 1:numel(perc)
         text(k, perc(k)+3, sprintf('%.1f%%', perc(k)), ...
             'HorizontalAlignment','center','FontWeight','bold','Color','k');
     end
 
-    % --- Subplot 4: Autocorrelazione media della velocità (con errore)
+    % --- Subplot 4: Mean speed autocorrelation (with error band)
     subplot(2,2,4);
-    maxLag = 10; % puoi aumentare se vuoi
+    maxLag = 10;
     autocorr_all = nan(height(trackStats), maxLag+1);
     for i = 1:height(trackStats)
         id = trackStats.TRACK_ID(i);
         speeds = converted_data.SPEED(converted_data.TRACK_ID==id);
         if numel(speeds) > maxLag
             ac = xcorr(speeds-mean(speeds,'omitnan'), maxLag, 'coeff');
-            autocorr_all(i,:) = ac(maxLag+1:end); % solo lag positivi (incluso zero)
+            autocorr_all(i,:) = ac(maxLag+1:end);
         end
     end
-    mean_autocorr = nanmean(autocorr_all,1);
-    std_autocorr = nanstd(autocorr_all,0,1);
+    mean_autocorr = mean(autocorr_all,1,'omitnan');
+    std_autocorr = std(autocorr_all,0,1, 'omitnan');
     n_auto = sum(~isnan(autocorr_all),1);
     sem_autocorr = std_autocorr ./ sqrt(n_auto);
     lags = 0:maxLag;
-    % Banda errore
     fill([lags fliplr(lags)], [mean_autocorr+sem_autocorr fliplr(mean_autocorr-sem_autocorr)], ...
         [0.9 0.7 0.4],'FaceAlpha',0.3,'EdgeColor','none');
     hold on
@@ -975,7 +896,7 @@ end
             hold off
         end
 
-        %% PRINT RISULTATI
+        %% PRINT RESULTS
         function printResults(obj)
             net_movement = obj.calculateNetMovement();
             [p_value, is_significant] = obj.testPhototaxis();
@@ -1027,7 +948,7 @@ end
             fprintf('\n================================\n\n');
         end
 
-        %% PLOT RISULTATI TEMPORALI
+        %% TEMPORAL RESULTS PLOT
         function plotResults(obj, results, useSeconds)
             if nargin < 3
                 useSeconds = false;
@@ -1035,7 +956,7 @@ end
 
             obj.printResults();
 
-            fig = figure('Position', [100 100 1200 800],'Name','AnalisiMovimento');
+            fig = figure('Position', [100 100 1200 800],'Name','MovementAnalysis');
             set(fig, 'Color', 'white');
 
             if useSeconds
@@ -1070,12 +991,12 @@ end
             end
 
             sgtitle({['Movement Analysis Results'], ...
-                     ['Data: ' datestr(now, 'dd-mm-yyyy HH:MM:SS')]}, ...
+                     ['Date: ' datestr(now, 'dd-mm-yyyy HH:MM:SS')]}, ...
                      'FontSize', 16, 'FontWeight', 'bold');
 
         end
 
-        %% FUNZIONE DI SUPPORTO PER I PLOT TEMPORALI
+        %% HELPER FOR TEMPORAL PLOTS
         function plotMetricWithStd(obj, x, y, std_y, color, titleStr, ylabelStr, xlabelStr)
             hold on
             y_mean = mean(y);
@@ -1089,7 +1010,7 @@ end
                 'FaceAlpha', 0.2, 'EdgeColor', 'none');
             plot(x, y, [color '-'], 'LineWidth', 2.5);
 
-            if contains(lower(titleStr), 'velocità') || contains(lower(titleStr), 'displacement')
+            if contains(lower(titleStr), 'speed') || contains(lower(titleStr), 'displacement')
                 ylim([0, max_scale]);
             else
                 ylim([max(-max_scale, min(y - std_y)), min(max_scale, max(y + std_y))]);
@@ -1105,11 +1026,9 @@ end
             hold off
         end
 
-                %% METRICHE DI DEFAULT (quando la finestra non ha dati utili)
+                %% DEFAULT METRICS
         function metrics = createDefaultMetrics(obj)
-            % Ritorna una struct con campi usati dal resto della classe
-            % Usare NaN per le medie/statistiche eviterà di introdurre valori
-            % artefatti (0) nei plot/analisi quando non ci sono dati.
+            % Returns a NaN-filled metrics struct to avoid zero artefacts in plots.
             metrics = struct();
             metrics.meanSpeed = NaN;
             metrics.stdSpeed = NaN;

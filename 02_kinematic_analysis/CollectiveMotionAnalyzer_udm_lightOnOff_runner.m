@@ -1,105 +1,99 @@
-% === SCRIPT DI ANALISI COLLECTIVE MOTION ===
+% === COLLECTIVE MOTION ANALYSIS SCRIPT ===
 % close all;
 % clear all;
-% Directory principale
+% Main directory
 main_folder =['']; %insert main folder
 
-% 0. Specifica se la luce è presente
-hasLight = true; % <<--- METTI true se la luce c'è, false se NON c'è
+% 0. Specify whether light is present
+hasLight = true; % true if light is present, false otherwise
 
-% 1. CARICA IL FILE .MAT (modifica il nome se serve)
-matFileName = fullfile(main_folder, 'converted_data.mat');   % <-- Cambia qui il nome del tuo file se diverso
-dataStruct = load(matFileName);       % Carica la struttura dal .mat
-converted_data = dataStruct.converted_data; % Assicurati che il campo si chiami così! cluster_k_data
+% 1. Load the .mat file
+matFileName = fullfile(main_folder, 'converted_data.mat');
+dataStruct = load(matFileName);
+converted_data = dataStruct.converted_data;
 
 if ~isempty(matFileName)
     file_path = fullfile(main_folder, 'Collective_global');
 if ~exist(file_path, 'dir')
-    mkdir(file_path);   % crea la cartella se non esiste
+    mkdir(file_path);
 end
 end
 
-% 2. Parametri di classificazione (modificabili)
-minDisplacement = 20;      % micron, soglia per "ferma"
-minStraightness = 0.3;     % soglia per "direzionale"
-lightDirection = [1 0];    % direzione della luce (esempio: verso destra)
+% 2. Classification parameters
+minDisplacement = 20;      % µm, threshold for stationary
+minStraightness = 0.3;     % threshold for directional
+lightDirection = [1 0];    % light direction (e.g. rightward)
 
-% 3. Crea l'oggetto analizzatore (ora con flag hasLight)
+% 3. Create analyzer object
 analyzer = CollectiveMotionAnalyzer_udm_lightOnOff(converted_data, lightDirection, minDisplacement, minStraightness, hasLight);
 
-% 4. Analizza l'evoluzione temporale (puoi cambiare la dimensione della finestra)
+% 4. Temporal evolution analysis
 windowSize = 10;
 results = analyzer.analyzeTemporalEvolution(windowSize);
 
-% 5. Classifica le tracce (ferma, tondo, direzionale)
+% 5. Classify tracks
 [trackStats, summaryStats] = analyzer.classifyTracks();
-% Ottieni gli ID delle tracce motili
-motile_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "tondo") | strcmp(trackStats.Label, "direzionale"));
+motile_ids = trackStats.TRACK_ID(strcmp(trackStats.Label, "Circling") | strcmp(trackStats.Label, "Directional"));
 
-% Calcola entrambe le evoluzioni temporali
-[results, results_motili] = analyzer.analyzeTemporalEvolutionBoth(windowSize, motile_ids);
+[results, results_motile] = analyzer.analyzeTemporalEvolutionBoth(windowSize, motile_ids);
 
-% 6. Clustering sulle direzionali (interattivo: puoi accettare o cambiare il numero di cluster)
+% 6. Directional clustering (interactive)
 clusterStats = analyzer.analyzeDirectionalClustersInteractive(summaryStats);
 if ~isstruct(clusterStats) || isempty(clusterStats)
     clusterStats.nClusters = 0;
     clusterStats.summary = [];
 end
 
-% 7. Plot delle direzioni principali (frecce cluster) + movimento netto
+% 7. Net movement and cluster directions plot
 analyzer.plotNetMovement(clusterStats);
 
-% 8. Nuovi plot statistici sintetici (con errori)
+% 8. Summary statistics plot
 analyzer.plotSummaryStats(trackStats, summaryStats, converted_data);
 
-% (Opzionale: stampa le percentuali per info)
-fprintf('Percentuale ferme: %.1f%%\n', summaryStats.percFerma);
-fprintf('Percentuale in tondo: %.1f%%\n', summaryStats.percTondo);
-fprintf('Percentuale direzionali: %.1f%%\n', summaryStats.percDirezionale);
+fprintf('Percentage Stationary: %.1f%%\n', summaryStats.percStationary);
+fprintf('Percentage in Circling: %.1f%%\n', summaryStats.percCircling);
+fprintf('Percentage Directional: %.1f%%\n', summaryStats.percDirectional);
 
-% 9. Visualizzazione dei risultati temporali (frame o secondi)
-%analyzer.plotResults(results);         % Frame sull'asse x
-analyzer.plotResults(results, true);  % Secondi sull'asse x
+% 9. Temporal results visualization
+%analyzer.plotResults(results);         % frame axis
+analyzer.plotResults(results, true);  % seconds axis
 
-% 10. (Opzionale) Plot rosa dei venti/angoli
+% 10. Phototaxis rose plot
 startFrame = min(converted_data.FRAME_SOURCE);
 endFrame = max(converted_data.FRAME_SOURCE);
 analyzer.plotPhototaxisRose(startFrame, endFrame);
 
-% 11. (Opzionale) Stampa report riassuntivo in console
+% 11. Print summary report
 analyzer.printResults();
 
-% === CALCOLI AGGIUNTIVI E TABELLE ===
+% === ADDITIONAL CALCULATIONS AND TABLES ===
 
-% Calcolo durata media e std tracce (in frame)
-durate = zeros(height(trackStats),1);
+% Mean and std track duration (in frames)
+duration = zeros(height(trackStats),1);
 for i = 1:height(trackStats)
     id = trackStats.TRACK_ID(i);
     frames = converted_data.FRAME_SOURCE(converted_data.TRACK_ID == id);
     if ~isempty(frames)
-        durata_traccia = max(frames) - min(frames) + 1;
-        durate(i) = durata_traccia;
+        duration_track = max(frames) - min(frames) + 1;
+        duration(i) = duration_track;
     end
 end
-durata_media = mean(durate, 'omitnan');
-durata_std = std(durate, 'omitnan');
+duration_mean= mean(duration, 'omitnan');
+duration_std = std(duration, 'omitnan');
 
-% --- Nuovi calcoli statistici per tabella media ---
-% -- Velocità
-velocita = trackStats.MeanSpeed;
-vel_media = mean(velocita, 'omitnan');
-vel_mediana = median(velocita, 'omitnan');
-vel_std = std(velocita, 'omitnan');
-vel_sem = vel_std / sqrt(sum(~isnan(velocita)));
+velocity = trackStats.MeanSpeed;
+vel_mean= mean(velocity, 'omitnan');
+vel_median = median(velocity, 'omitnan');
+vel_std = std(velocity, 'omitnan');
+vel_sem = vel_std / sqrt(sum(~isnan(velocity)));
 
-% -- Spostamento netto
-spost_netto = trackStats.NetDisplacement;
-spost_netto_media = mean(spost_netto, 'omitnan');
-spost_netto_mediana = median(spost_netto, 'omitnan');
-spost_netto_std = std(spost_netto, 'omitnan');
-spost_netto_sem = spost_netto_std / sqrt(sum(~isnan(spost_netto)));
+net_disp = trackStats.NetDisplacement;
+net_disp_mean= mean(net_disp, 'omitnan');
+net_disp_median = median(net_disp, 'omitnan');
+net_disp_std = std(net_disp, 'omitnan');
+net_disp_sem = net_disp_std / sqrt(sum(~isnan(net_disp)));
 
-% -- Autocorrelazione media velocità (lag 1 come esempio riassuntivo)
+% Mean speed autocorrelation (lag 1)
 maxLag = 10;
 autocorr_all = nan(height(trackStats), maxLag+1);
 for i = 1:height(trackStats)
@@ -107,7 +101,7 @@ for i = 1:height(trackStats)
     speeds = converted_data.SPEED(converted_data.TRACK_ID==id);
     if numel(speeds) > maxLag
         ac = xcorr(speeds-mean(speeds,'omitnan'), maxLag, 'coeff');
-        autocorr_all(i,:) = ac(maxLag+1:end); % solo lag positivi (incluso zero)
+        autocorr_all(i,:) = ac(maxLag+1:end);
     end
 end
 mean_autocorr = nanmean(autocorr_all,1);
@@ -118,7 +112,7 @@ ac_lag1 = mean_autocorr(2); % lag 1
 ac_lag1_std = std_autocorr(2);
 ac_lag1_sem = sem_autocorr(2);
 
-% Parametri globali di movimento netto
+% Global net movement parameters
 net_movement = analyzer.calculateNetMovement();
 [p_value, is_significant] = analyzer.testPhototaxis();
 dx = converted_data.POSITION_X_TARGET - converted_data.POSITION_X_SOURCE;
@@ -133,11 +127,10 @@ err_mov_netto = sqrt( ...
     (std(dx,'omitnan')/sqrt(summaryStats.nTracks))^2 + ...
     (std(dy,'omitnan')/sqrt(summaryStats.nTracks))^2 );
 
-% --------- Calcolo parametri rispetto alla luce solo se hasLight ---------
 if hasLight
-    ang_luce = rad2deg(abs(mean_angle - atan2(lightDirection(2), lightDirection(1))));
+    ang_light = rad2deg(abs(mean_angle - atan2(lightDirection(2), lightDirection(1))));
 else
-    ang_luce = NaN; % oppure 'NA' se preferisci testo
+    ang_light = NaN;
 end
 figure('Name','HistStraightness')
 histogram(trackStats.Straightness, 20);
@@ -145,44 +138,43 @@ xlabel('Straightness');
 ylabel('Number of Tracks');
 title('Straightness distribution of the tracks');
 
-% (opzionale) traccia una linea verticale sulla soglia attuale
 hold on;
-xline(minStraightness, 'r--', 'Straightness Treshold');
+xline(minStraightness, 'r--', 'Straightness Threshold');
 hold off;
 
-% === TABELLE ===
+% === TABLES ===
 
-% Tabella media
-media_row = { ...
+% Summary table
+mean_row = { ...
     matFileName, ...
-    summaryStats.nTracks, summaryStats.nFerma, summaryStats.nTondo, summaryStats.nDirezionale, ...
-    summaryStats.percFerma, summaryStats.percTondo, summaryStats.percDirezionale, ...
-    durata_media, durata_std, ...
-    vel_media, vel_mediana, vel_std, vel_sem, ...
-    spost_netto_media, spost_netto_mediana, spost_netto_std, spost_netto_sem, ...
+    summaryStats.nTracks, summaryStats.nStationary, summaryStats.nCircling, summaryStats.nDirectional, ...
+    summaryStats.percStationary, summaryStats.percCircling, summaryStats.percDirectional, ...
+    duration_mean, duration_std, ...
+    vel_mean, vel_median, vel_std, vel_sem, ...
+    net_disp_mean, net_disp_median, net_disp_std, net_disp_sem, ...
     ac_lag1, ac_lag1_std, ac_lag1_sem, ...
     norm(net_movement), rad2deg(mean_angle), err_mov_netto, ...
     mean_vector_length, rad2deg(circular_std), ...
-    p_value, string(CollectiveMotionAnalyzer_udm_lightOnOff.conditional(is_significant, 'Significativa', 'Non significativa')), ...
-    ang_luce, ... % <-- ora è NaN se la luce non c'è!
+    p_value, string(CollectiveMotionAnalyzer_udm_lightOnOff.conditional(is_significant, 'Significant', 'Not Significant')), ...
+    ang_light, ...
     clusterStats.nClusters ...
     };
 
-media_varnames = { ...
+mean_varnames = { ...
     'FileName', ...
-    'nTracks', 'nFerma', 'nTondo', 'nDirezionale', ...
-    'percFerma [%]', 'percTondo [%]', 'percDirezionale [%]', ...
-    'durata_media [frame]', 'durata_std [frame]', ...
-    'vel_media [µm/s]', 'vel_mediana [µm/s]', 'vel_std [µm/s]', 'vel_sem [µm/s]', ...
-    'spost_netto_media [µm]', 'spost_netto_mediana [µm]', 'spost_netto_std [µm]', 'spost_netto_sem [µm]', ...
-    'autocorrLag1_media', 'autocorrLag1_std', 'autocorrLag1_sem', ...
-    'mag_mov_netto [µm]', 'ang_mov_netto [°]', 'err_mov_netto [µm]', ...
-    'forza_direzionale', 'dev_std_circolare [°]', ...
-    'p_value', 'significativa', 'ang_luce [°]', 'nCluster'};
+    'nTracks', 'nStationary', 'nCircling', 'nDirectional', ...
+    'percStationary [%]', 'percCircling [%]', 'percDirectional [%]', ...
+    'duration_mean[frame]', 'duration_std [frame]', ...
+    'vel_mean[µm/s]', 'vel_median [µm/s]', 'vel_std [µm/s]', 'vel_sem [µm/s]', ...
+    'net_disp_mean[µm]', 'net_disp_median [µm]', 'net_disp_std [µm]', 'net_disp_sem [µm]', ...
+    'autocorrLag1_mean', 'autocorrLag1_std', 'autocorrLag1_sem', ...
+    'net_mov_mag [µm]', 'net_mov_angle [°]', 'err_net_mov [µm]', ...
+    'Directional_strength', 'circular_std_dev [°]', ...
+    'p_value', 'Significant', 'light_angle [°]', 'nCluster'};
 
-T_media = cell2table(media_row, 'VariableNames', media_varnames);
+T_mean= cell2table(mean_row, 'VariableNames', mean_varnames);
 
-% Tabella per cluster
+% Cluster table
 cluster_rows = {};
 for k=1:clusterStats.nClusters
     cs = clusterStats.summary(k);
@@ -198,9 +190,9 @@ for k=1:clusterStats.nClusters
     cluster_rows{end,10} = cs.vel_sem;
     cluster_rows{end,11} = cs.lightAlignment;
     if hasLight
-        cluster_rows{end,9} = cs.lightAlignment;
+        cluster_rows{end,11} = cs.lightAlignment;
     else
-        cluster_rows{end,9} = NaN; % oppure 'NA'
+        cluster_rows{end,11} = NaN;
     end
 end
 
@@ -224,18 +216,18 @@ else
     T_cluster = cell2table(cluster_rows, 'VariableNames', cluster_varnames);
 end
 
-save(fullfile(file_path, 'risultati_video.mat'), 'T_media', 'T_cluster')
-writetable(T_media, fullfile(file_path, 'risultati_media.xlsx'))
-writetable(T_cluster, fullfile(file_path, 'risultati_cluster.xlsx'))
-%% %% salvataggio figure
-prompt = sprintf('Vuoi salvare le figure? [S/N]: ');
+save(fullfile(file_path, 'results_video.mat'), 'T_mean', 'T_cluster')
+writetable(T_mean, fullfile(file_path, 'results_mean.xlsx'))
+writetable(T_cluster, fullfile(file_path, 'results_cluster.xlsx'))
+%% Save figures
+prompt = sprintf('Do you want to save the figures? [Y/N]: ');
 answer2 = input(prompt, 's');
-if strcmpi(answer2, 's')
+if strcmpi(answer2, 'y')
     names = { ...
         'PhototaxisAnalysis', ...
-        'StatisticheTracce', ...
+        'TracksStat', ...
         'NetMovementAnalysis(Clusters)', ...
-        'AnalisiMovimento', ...
+        'MovementAnalysis', ...
         'HistStraightness' ...
     };
     for i = 1:numel(names)
@@ -249,15 +241,12 @@ if strcmpi(answer2, 's')
 else
     finished = true;
 end
-% === FINE SCRIPT parte 1===
 
-% --- Salva tabella delle tracce (trackStats) ---
-writetable(trackStats,fullfile(file_path, 'tracce_stats.xlsx'));
+% Save track stats table
+writetable(trackStats,fullfile(file_path, 'tracks_stat.xlsx'));
 
-% --- Salva tabella evoluzione temporale (results) ---
-% Crea tabella da struttura results
-% RISULTATI TUTTE LE TRACCE
-T_temporali = table(results.windowFrames(:), results.windowTimes(:), ...
+% ALL TRACKS
+T_temporal = table(results.windowFrames(:), results.windowTimes(:), ...
     results.meanSpeed(:), results.stdSpeed(:), ...
     results.displacement(:), results.stdDisplacement(:), ...
     results.directionalChange(:), results.stdDirectionalChange(:), ...
@@ -267,30 +256,28 @@ T_temporali = table(results.windowFrames(:), results.windowTimes(:), ...
                       'MeanDisplacement', 'StdDisplacement', ...
                       'MeanDirectionalChange', 'StdDirectionalChange', ...
                       'MeanAlignment', 'StdAlignment', 'nTracks'});
-writetable(T_temporali, fullfile(file_path,'risultati_temporali_tutte.xlsx'));
-save(fullfile(file_path, 'risultati_temporali_tutte.mat'), 'T_temporali');
+writetable(T_temporal, fullfile(file_path,'all_temporal_results.xlsx'));
+save(fullfile(file_path, 'all_temporal_results.mat'), 'T_temporal');
 
-% RISULTATI SOLO MOTILI
-T_temporali_motili = table(results_motili.windowFrames(:), results_motili.windowTimes(:), ...
-    results_motili.meanSpeed(:), results_motili.stdSpeed(:), ...
-    results_motili.displacement(:), results_motili.stdDisplacement(:), ...
-    results_motili.directionalChange(:), results_motili.stdDirectionalChange(:), ...
-    results_motili.lightAlignment(:), results_motili.stdLightAlignment(:), ...
-    results_motili.nTracks(:), ...
+% MOTILE TRACKS ONLY
+T_temporal_motile = table(results_motile.windowFrames(:), results_motile.windowTimes(:), ...
+    results_motile.meanSpeed(:), results_motile.stdSpeed(:), ...
+    results_motile.displacement(:), results_motile.stdDisplacement(:), ...
+    results_motile.directionalChange(:), results_motile.stdDirectionalChange(:), ...
+    results_motile.lightAlignment(:), results_motile.stdLightAlignment(:), ...
+    results_motile.nTracks(:), ...
     'VariableNames', {'Frame', 'Time_s', 'MeanSpeed', 'StdSpeed', ...
                       'MeanDisplacement', 'StdDisplacement', ...
                       'MeanDirectionalChange', 'StdDirectionalChange', ...
                       'MeanAlignment', 'StdAlignment', 'nTracks'});
-writetable(T_temporali_motili, fullfile(file_path, 'risultati_temporali_motili.xlsx'));
-save(fullfile(file_path, 'risultati_temporali_motili.mat'), 'T_temporali_motili');
+writetable(T_temporal_motile, fullfile(file_path, 'motile_temporal_results.xlsx'));
+save(fullfile(file_path, 'motile_temporal_results.mat'), 'T_temporal_motile');
 
-% % --- Salva autocorrelazione delle tracce (se serve per grafico) ---
- fprintf('Al momento autocorrelazione non funziona');
-% maxLag = size(autocorr_all,2)-1; % come nel tuo script
+%fprintf('The autocorrelation calculation needs improvement');
+% maxLag = size(autocorr_all,2)-1; 
 % T_auto = array2table(autocorr_all, 'VariableNames', ...
 %     arrayfun(@(x) sprintf('Lag%d',x), 0:maxLag, 'UniformOutput', false));
-% T_auto.TRACK_ID = trackStats.TRACK_ID; % aggiungi colonna identificativa
+% T_auto.TRACK_ID = trackStats.TRACK_ID; 
 % writetable(T_auto, fullfile(file_path, 'autocorrelazione_tracce.xlsx'));
-% === FINE SCRIPT parte 2===
 close all;
-clear all;
+% clear all;
