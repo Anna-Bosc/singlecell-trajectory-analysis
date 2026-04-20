@@ -3,7 +3,7 @@
 This step computes the Mean Squared Displacement (MSD) and performs advanced model fitting on selected trajectory datasets.
 
 **Files**
-calcoloMSD_completo_udm_AUTO.m → main script
+MSD_udm_AUTO.m → main script
 draw_flash_areas.m → utility function for plotting flash intervals
 Overview
 
