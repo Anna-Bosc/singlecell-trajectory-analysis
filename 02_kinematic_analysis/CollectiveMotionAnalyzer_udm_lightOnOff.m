@@ -632,9 +632,25 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
     sem = std(cos_per_track) / sqrt(n);
 
     % one-sample t-test against 0, bidirectional
+% One-sample t-test on meanAlignment against 0.
+% The test is one-tailed in the direction actually observed in the data:
+% depending on the sign of meanAlignment, the corresponding tail of the
+% t-distribution is selected as p-value. This reflects the fact that the
+% phototactic direction (toward or away from the source) is determined
+% by the sign of the measured alignment, not assumed a priori.
+%
+% Naming convention (consistent with the main manuscript):
+%   - meanAlignment > 0 → motion parallel to lightDirection
+%                         → NEGATIVE phototaxis (away from light source)
+%   - meanAlignment < 0 → motion antiparallel to lightDirection
+%                         → POSITIVE phototaxis (toward light source)
+% The variable names p_positive and p_negative below refer to the two
+% tails of the t-distribution (positive/negative t_stat), not to the
+% biological phototactic direction.
+
     t_stat = meanAlignment / sem;
-    p_positive = 1 - tcdf(t_stat, n-1);   % positive phototaxis (toward light)
-    p_negative = tcdf(t_stat, n-1);        % negative phototaxis (away from light)
+    p_positive = 1 - tcdf(t_stat, n-1);   % upper tail: meanAlignment > 0 negative phototaxis (away from light source)
+    p_negative = tcdf(t_stat, n-1);        % lower tail:meanAlignment < 0  positive phototaxis (toward light source)
 
     if meanAlignment >= 0
         p_value = p_positive;
@@ -643,7 +659,7 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
     end
     p_value = max(min(p_value, 1), 0);
 
-    is_significant = (p_value < alpha) && (abs(meanAlignment) > 0.25);
+    is_significant = (p_value < alpha) && (abs(meanAlignment) > 0.20);
 
     % --- DEBUG ---
     fprintf('\n[DEBUG testPhototaxis]\n');
@@ -651,12 +667,12 @@ function [p_value, is_significant] = testPhototaxis(obj, alpha)
     fprintf('  meanAlignment   : %.4f\n', meanAlignment);
     fprintf('  t_stat          : %.4f\n', t_stat);
     fprintf('  p_value         : %.4e\n', p_value);
-    fprintf('  |alignment|>0.25: %d\n',   abs(meanAlignment) > 0.25);
+    fprintf('  |alignment|>0.20: %d\n',   abs(meanAlignment) > 0.20);
     if meanAlignment >= 0
-        fprintf('  Direction       : positive (toward the light)\n');
-    else
-        fprintf('  Direction       : negative (away from the light)\n');
-    end
+    fprintf('  Direction       : negative (away from the light source)\n');
+else
+    fprintf('  Direction       : positive (toward the light source)\n');
+end
 end
 
         %% NET MOVEMENT
